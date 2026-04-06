@@ -33,6 +33,13 @@ def gather_reddit() -> list:
         "site:reddit.com crepey skin",
         'site:reddit.com "crepey skin" treatment',
         'site:reddit.com "crepey skin" anti-aging',
+        'site:reddit.com/r/SkincareAddiction crepey skin',
+        'site:reddit.com/r/antiaging crepey skin',
+        'site:reddit.com/r/womenover50 crepey skin',
+        'site:reddit.com/r/womenover40 crepey skin',
+        'site:reddit.com/r/Frugal_Jerk saggy loose skin collagen',
+        'site:reddit.com "turkey neck" treatment',
+        'site:reddit.com "loose skin" collagen anti-aging',
     ]
     all_posts = []
     seen = set()
