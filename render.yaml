@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: research-agent
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: META_ACCESS_TOKEN
+        sync: false
+
+  - type: cron
+    name: daily-research
+    runtime: python
+    schedule: "0 8 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: curl -X POST https://research-agent.onrender.com/run
