@@ -43,9 +43,9 @@ def save_brain(brain: dict):
     except Exception as e:
         log.warning(f"Brain save error: {e}")
 
-def update_brain(brain: dict, posts: list, gutefrage_posts: list):
+def update_brain(brain: dict, posts: list, amazon_posts: list):
     """Extrahiert Learnings aus Posts und fügt sie ins Gehirn ein."""
-    all_posts = posts + gutefrage_posts
+    all_posts = posts + amazon_posts
 
     DESIRE_KEYWORDS = [
         "want", "wish", "hope", "looking for", "trying to", "want to",
@@ -168,15 +168,15 @@ def gather_reddit() -> list:
     return all_posts
 
 
-# ── Gutefrage.net via SerpAPI ─────────────────────────────────────────────────
+# ── Amazon Reviews via SerpAPI ────────────────────────────────────────────────
 
-def gather_gutefrage() -> list:
+def gather_amazon() -> list:
     queries = [
-        "site:gutefrage.net schlaffes haut Anti-Aging",
-        "site:gutefrage.net crepey haut behandlung",
-        "site:gutefrage.net hängende haut straffen",
-        "site:gutefrage.net kollagen haut falten",
-        "site:gutefrage.net hals haut straffen",
+        'site:amazon.com "crepey skin" review',
+        'site:amazon.com "loose skin" collagen review',
+        'site:amazon.com "saggy skin" anti-aging review',
+        'site:amazon.com "turkey neck" cream review',
+        'site:amazon.com "skin tightening" supplement review',
     ]
     all_posts = []
     seen = set()
@@ -191,19 +191,19 @@ def gather_gutefrage() -> list:
             r.raise_for_status()
             for result in r.json().get("organic_results", []):
                 url = result.get("link", "")
-                if not url or url in seen or "gutefrage.net" not in url:
+                if not url or url in seen or "amazon.com" not in url:
                     continue
                 seen.add(url)
                 all_posts.append({
                     "title": result.get("title", ""),
                     "url": url,
-                    "subreddit": "gutefrage",
+                    "subreddit": "amazon",
                     "body": result.get("snippet", "")[:400],
-                    "source": "gutefrage",
+                    "source": "amazon",
                 })
         except Exception as e:
-            log.warning(f"SerpAPI Gutefrage error '{q}': {e}")
-    log.info(f"Gutefrage posts found: {len(all_posts)}")
+            log.warning(f"SerpAPI Amazon error '{q}': {e}")
+    log.info(f"Amazon posts found: {len(all_posts)}")
     return all_posts
 
 
@@ -257,13 +257,13 @@ def run_research(chat_id: str = None):
     log.info("Starting research run...")
 
     reddit_posts = gather_reddit()
-    gutefrage_posts = gather_gutefrage()
+    amazon_posts = gather_amazon()
     meta_ads = get_meta_ads()
-    all_posts = reddit_posts + gutefrage_posts
+    all_posts = reddit_posts + amazon_posts
 
     # Gehirn updaten
     brain = load_brain()
-    brain = update_brain(brain, reddit_posts, gutefrage_posts)
+    brain = update_brain(brain, reddit_posts, amazon_posts)
     save_brain(brain)
 
     lines = [f"<b>Research Brief {today}</b>\n"]
@@ -279,15 +279,15 @@ def run_research(chat_id: str = None):
     else:
         lines.append("Keine Posts gefunden.")
 
-    # Gutefrage
-    lines.append("\n<b>Gutefrage.net — Deutsche Kundensprache</b>")
-    if gutefrage_posts:
-        for p in sorted(gutefrage_posts, key=score_post, reverse=True)[:4]:
+    # Amazon Reviews
+    lines.append("\n<b>Amazon Reviews — Kundenstimmen</b>")
+    if amazon_posts:
+        for p in sorted(amazon_posts, key=score_post, reverse=True)[:4]:
             lines.append(f'• <a href="{p["url"]}">{p["title"][:90]}</a>')
             if p.get("body"):
                 lines.append(f'  └ "{p["body"][:120]}"')
     else:
-        lines.append("Keine Posts gefunden.")
+        lines.append("Keine Reviews gefunden.")
 
     # Hooks
     hooks = []
