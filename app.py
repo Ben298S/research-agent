@@ -276,6 +276,31 @@ def run_research(chat_id: str = None):
             lines.append(f'  └ r/{p["subreddit"]}')
             if p.get("body"):
                 lines.append(f'  └ "{p["body"][:120]}"')
+
+        # Desires aus Reddit
+        r_desires = [p["title"][:120] for p in reddit_posts
+                     if any(kw in (p["title"]+" "+p.get("body","")).lower()
+                            for kw in ["want","wish","hope","looking for","trying to","would love","finally","need"])][:4]
+        if r_desires:
+            lines.append("\n💚 <b>Desires:</b>")
+            for d in r_desires:
+                lines.append(f"  • {d}")
+
+        # Probleme aus Reddit
+        r_problems = [p["title"][:120] for p in reddit_posts
+                      if any(kw in (p["title"]+" "+p.get("body","")).lower()
+                             for kw in ["hate","embarrassed","struggle","frustrated","can't","nothing works","tried everything","worse"])][:4]
+        if r_problems:
+            lines.append("\n😤 <b>Probleme:</b>")
+            for p in r_problems:
+                lines.append(f"  • {p}")
+
+        # Kundensprache O-Ton
+        r_lang = [p["body"][:150] for p in reddit_posts if len(p.get("body","")) > 40][:3]
+        if r_lang:
+            lines.append("\n💬 <b>Kundensprache:</b>")
+            for l in r_lang:
+                lines.append(f'  "{l}"')
     else:
         lines.append("Keine Posts gefunden.")
 
