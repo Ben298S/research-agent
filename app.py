@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
 app = Flask(__name__)
 
@@ -25,10 +26,9 @@ def send_telegram(text: str, chat_id: str = None):
         requests.post(url, data={"chat_id": cid, "text": chunk}, timeout=15)
 
 
-# ── Reddit via DuckDuckGo ─────────────────────────────────────────────────────
+# ── Reddit via SerpAPI ────────────────────────────────────────────────────────
 
 def gather_reddit() -> list:
-    from duckduckgo_search import DDGS
     queries = [
         "site:reddit.com crepey skin",
         'site:reddit.com "crepey skin" treatment',
@@ -36,24 +36,30 @@ def gather_reddit() -> list:
     ]
     all_posts = []
     seen = set()
-    with DDGS() as ddgs:
-        for q in queries:
-            try:
-                for r in ddgs.text(q, max_results=10):
-                    url = r.get("href", "")
-                    if not url or url in seen or "reddit.com" not in url:
-                        continue
-                    seen.add(url)
-                    parts = url.split("/")
-                    sub = parts[4] if len(parts) > 4 and parts[3] == "r" else "reddit"
-                    all_posts.append({
-                        "title": r.get("title", ""),
-                        "url": url,
-                        "subreddit": sub,
-                        "body": r.get("body", "")[:400],
-                    })
-            except Exception as e:
-                log.warning(f"DDG error '{q}': {e}")
+    for q in queries:
+        try:
+            r = requests.get("https://serpapi.com/search", params={
+                "api_key": SERPAPI_KEY,
+                "engine": "google",
+                "q": q,
+                "num": 10,
+            }, timeout=15)
+            r.raise_for_status()
+            for result in r.json().get("organic_results", []):
+                url = result.get("link", "")
+                if not url or url in seen or "reddit.com" not in url:
+                    continue
+                seen.add(url)
+                parts = url.split("/")
+                sub = parts[4] if len(parts) > 4 and parts[3] == "r" else "reddit"
+                all_posts.append({
+                    "title": result.get("title", ""),
+                    "url": url,
+                    "subreddit": sub,
+                    "body": result.get("snippet", "")[:400],
+                })
+        except Exception as e:
+            log.warning(f"SerpAPI error '{q}': {e}")
     log.info(f"Reddit posts found: {len(all_posts)}")
     return all_posts
 
