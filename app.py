@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 import requests
@@ -14,10 +15,49 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_DOC_ID = "1N-52u30EKLgctH6gh08niaPDPrEqVZYRqKaC7Z0KDMs"
 
 BRAIN_FILE = "/tmp/brain.json"
 
 app = Flask(__name__)
+
+
+# ── Google Docs ───────────────────────────────────────────────────────────────
+
+def write_to_google_doc(text: str):
+    """Schreibt den Research Brief ins Google Doc."""
+    if not GOOGLE_SERVICE_ACCOUNT_JSON:
+        log.warning("GOOGLE_SERVICE_ACCOUNT_JSON nicht gesetzt – Google Doc übersprungen.")
+        return
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        creds_info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+        scopes = ["https://www.googleapis.com/auth/documents"]
+        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
+        service = build("docs", "v1", credentials=creds)
+
+        doc = service.documents().get(documentId=GOOGLE_DOC_ID).execute()
+        end_index = doc["body"]["content"][-1]["endIndex"] - 1
+
+        insert_text = "\n\n" + text + "\n"
+        requests_body = [
+            {
+                "insertText": {
+                    "location": {"index": end_index},
+                    "text": insert_text,
+                }
+            }
+        ]
+        service.documents().batchUpdate(
+            documentId=GOOGLE_DOC_ID,
+            body={"requests": requests_body}
+        ).execute()
+        log.info("Google Doc updated.")
+    except Exception as e:
+        log.warning(f"Google Doc error: {e}")
 
 
 # ── Gehirn (persistentes Lernen) ──────────────────────────────────────────────
@@ -44,13 +84,13 @@ def save_brain(brain: dict):
         log.warning(f"Brain save error: {e}")
 
 def update_brain(brain: dict, posts: list, amazon_posts: list):
-    """Extrahiert Learnings aus Posts und fügt sie ins Gehirn ein."""
+    """Extrahiert Learnings aus Posts und fuegt sie ins Gehirn ein."""
     all_posts = posts + amazon_posts
 
     DESIRE_KEYWORDS = [
         "want", "wish", "hope", "looking for", "trying to", "want to",
         "would love", "dream", "goal", "finally", "need something",
-        "suche", "wünsche", "möchte", "will", "hoffe", "träume", "brauche",
+        "suche", "wuensche", "moechte", "will", "hoffe", "traeume", "brauche",
     ]
     PROBLEM_KEYWORDS = [
         "hate", "embarrassed", "struggle", "frustrated", "cant", "can't",
@@ -65,7 +105,6 @@ def update_brain(brain: dict, posts: list, amazon_posts: list):
         text = p["title"] + " " + p.get("body", "")
         lower = text.lower()
 
-        # Desires
         for kw in DESIRE_KEYWORDS:
             if kw in lower:
                 snippet = p["title"][:120]
@@ -73,7 +112,6 @@ def update_brain(brain: dict, posts: list, amazon_posts: list):
                     brain["desires"].append(snippet)
                 break
 
-        # Problems
         for kw in PROBLEM_KEYWORDS:
             if kw in lower:
                 snippet = p["title"][:120]
@@ -81,27 +119,23 @@ def update_brain(brain: dict, posts: list, amazon_posts: list):
                     brain["problems"].append(snippet)
                 break
 
-        # Kundensprache – Zitate aus Body
         body = p.get("body", "")
         if len(body) > 40:
             quote = body[:150].strip()
             if quote not in brain["language"]:
                 LANGUAGE_SNIPPETS.append(quote)
 
-        # Hooks
         if any(kw in lower for kw in ["how", "why", "stop", "finally", "secret", "fix", "help",
                                         "wie", "warum", "endlich", "geheimnis"]):
             h = p["title"][:120]
             if h not in brain["hooks"]:
                 NEW_HOOKS.append(h)
 
-    # Nur neue hinzufügen
     brain["language"] = (brain["language"] + LANGUAGE_SNIPPETS)[-200:]
     brain["hooks"] = (brain["hooks"] + NEW_HOOKS)[-100:]
     brain["desires"] = brain["desires"][-100:]
     brain["problems"] = brain["problems"][-100:]
 
-    # Top Posts (nach Score)
     for p in sorted(all_posts, key=score_post, reverse=True)[:3]:
         entry = {"title": p["title"][:120], "url": p.get("url", ""), "source": p.get("source", "reddit")}
         if entry not in brain["top_posts"]:
@@ -129,13 +163,21 @@ def gather_reddit() -> list:
         "site:reddit.com crepey skin",
         'site:reddit.com "crepey skin" treatment',
         'site:reddit.com "crepey skin" anti-aging',
+        'site:reddit.com "crepey skin" before after',
+        'site:reddit.com "crepey skin" what worked',
         'site:reddit.com/r/SkincareAddiction crepey skin',
         'site:reddit.com/r/antiaging crepey skin',
         'site:reddit.com/r/womenover50 crepey skin',
         'site:reddit.com/r/womenover40 crepey skin',
+        'site:reddit.com/r/30PlusSkinCare crepey skin',
+        'site:reddit.com/r/femalefashionadvice crepey skin',
         'site:reddit.com "turkey neck" treatment',
+        'site:reddit.com "turkey neck" fix',
         'site:reddit.com "loose skin" collagen anti-aging',
         'site:reddit.com "saggy skin" fix',
+        'site:reddit.com "skin tightening" over 50',
+        'site:reddit.com "collagen loss" skin',
+        'site:reddit.com "thin skin" aging women',
     ]
     all_posts = []
     seen = set()
@@ -145,8 +187,8 @@ def gather_reddit() -> list:
                 "api_key": SERPAPI_KEY,
                 "engine": "google",
                 "q": q,
-                "num": 10,
-            }, timeout=15)
+                "num": 15,
+            }, timeout=20)
             r.raise_for_status()
             for result in r.json().get("organic_results", []):
                 url = result.get("link", "")
@@ -159,7 +201,7 @@ def gather_reddit() -> list:
                     "title": result.get("title", ""),
                     "url": url,
                     "subreddit": sub,
-                    "body": result.get("snippet", "")[:400],
+                    "body": result.get("snippet", "")[:500],
                     "source": "reddit",
                 })
         except Exception as e:
@@ -177,6 +219,9 @@ def gather_amazon() -> list:
         'site:amazon.com "saggy skin" anti-aging review',
         'site:amazon.com "turkey neck" cream review',
         'site:amazon.com "skin tightening" supplement review',
+        'site:amazon.com "crepey skin" serum review',
+        'site:amazon.com "skin firming" over 50 review',
+        'site:amazon.com "collagen supplement" skin review',
     ]
     all_posts = []
     seen = set()
@@ -186,8 +231,8 @@ def gather_amazon() -> list:
                 "api_key": SERPAPI_KEY,
                 "engine": "google",
                 "q": q,
-                "num": 10,
-            }, timeout=15)
+                "num": 15,
+            }, timeout=20)
             r.raise_for_status()
             for result in r.json().get("organic_results", []):
                 url = result.get("link", "")
@@ -198,7 +243,7 @@ def gather_amazon() -> list:
                     "title": result.get("title", ""),
                     "url": url,
                     "subreddit": "amazon",
-                    "body": result.get("snippet", "")[:400],
+                    "body": result.get("snippet", "")[:500],
                     "source": "amazon",
                 })
         except Exception as e:
@@ -242,7 +287,7 @@ HOOK_KEYWORDS = [
     "years younger", "anti-aging", "saggy", "loose", "collagen",
     "crepey", "crepe", "thin skin", "turkey neck",
     "wie", "warum", "endlich", "peinlich", "hasse", "sofort",
-    "schlaffes", "hängende", "kollagen", "straffen",
+    "schlaffes", "haengende", "kollagen", "straffen",
 ]
 
 def score_post(post: dict) -> int:
@@ -261,7 +306,6 @@ def run_research(chat_id: str = None):
     meta_ads = get_meta_ads()
     all_posts = reddit_posts + amazon_posts
 
-    # Gehirn updaten
     brain = load_brain()
     brain = update_brain(brain, reddit_posts, amazon_posts)
     save_brain(brain)
@@ -271,63 +315,57 @@ def run_research(chat_id: str = None):
     # Reddit
     lines.append("<b>Reddit — Crepey Skin</b>")
     if reddit_posts:
-        for p in sorted(reddit_posts, key=score_post, reverse=True)[:6]:
-            lines.append(f'• <a href="{p["url"]}">{p["title"][:90]}</a>')
-            lines.append(f'  └ r/{p["subreddit"]}')
+        for p in sorted(reddit_posts, key=score_post, reverse=True)[:12]:
+            lines.append(f'• {p["title"][:100]}')
+            lines.append(f'  \u2514 r/{p["subreddit"]}')
             if p.get("body"):
-                lines.append(f'  └ "{p["body"][:120]}"')
+                lines.append(f'  \u2514 "{p["body"][:200]}"')
 
-        # Desires aus Reddit
         r_desires = [p["title"][:120] for p in reddit_posts
                      if any(kw in (p["title"]+" "+p.get("body","")).lower()
-                            for kw in ["want","wish","hope","looking for","trying to","would love","finally","need"])][:4]
+                            for kw in ["want","wish","hope","looking for","trying to","would love","finally","need"])][:6]
         if r_desires:
-            lines.append("\n💚 <b>Desires:</b>")
+            lines.append("\n\U0001f49a <b>Desires:</b>")
             for d in r_desires:
                 lines.append(f"  • {d}")
 
-        # Probleme aus Reddit
         r_problems = [p["title"][:120] for p in reddit_posts
                       if any(kw in (p["title"]+" "+p.get("body","")).lower()
-                             for kw in ["hate","embarrassed","struggle","frustrated","can't","nothing works","tried everything","worse"])][:4]
+                             for kw in ["hate","embarrassed","struggle","frustrated","can't","nothing works","tried everything","worse"])][:6]
         if r_problems:
-            lines.append("\n😤 <b>Probleme:</b>")
+            lines.append("\n\U0001f621 <b>Probleme:</b>")
             for p in r_problems:
                 lines.append(f"  • {p}")
 
-        # Kundensprache O-Ton
-        r_lang = [p["body"][:150] for p in reddit_posts if len(p.get("body","")) > 40][:3]
+        r_lang = [p["body"][:200] for p in reddit_posts if len(p.get("body","")) > 40][:5]
         if r_lang:
-            lines.append("\n💬 <b>Kundensprache:</b>")
+            lines.append("\n\U0001f4ac <b>Kundensprache:</b>")
             for l in r_lang:
                 lines.append(f'  "{l}"')
     else:
         lines.append("Keine Posts gefunden.")
 
-    # Amazon Reviews
     lines.append("\n<b>Amazon Reviews — Kundenstimmen</b>")
     if amazon_posts:
-        for p in sorted(amazon_posts, key=score_post, reverse=True)[:4]:
-            lines.append(f'• <a href="{p["url"]}">{p["title"][:90]}</a>')
+        for p in sorted(amazon_posts, key=score_post, reverse=True)[:8]:
+            lines.append(f'• {p["title"][:100]}')
             if p.get("body"):
-                lines.append(f'  └ "{p["body"][:120]}"')
+                lines.append(f'  \u2514 "{p["body"][:200]}"')
     else:
         lines.append("Keine Reviews gefunden.")
 
-    # Hooks
     hooks = []
-    for p in sorted(all_posts, key=score_post, reverse=True)[:20]:
+    for p in sorted(all_posts, key=score_post, reverse=True)[:30]:
         if any(kw in p["title"].lower() for kw in ["how", "why", "stop", "finally", "secret", "fix",
                                                      "wie", "warum", "endlich", "geheimnis"]):
             hooks.append(p["title"])
-        if len(hooks) >= 5:
-            break
+            if len(hooks) >= 8:
+                break
     if hooks:
         lines.append("\n<b>Trending Hooks</b>")
         for h in hooks:
-            lines.append(f"  → {h[:100]}")
+            lines.append(f"  → {h[:120]}")
 
-    # Meta Ads
     lines.append("\n<b>Meta Ads — Cellu &amp; Happy Mammoth</b>")
     if meta_ads:
         for brand, ads in meta_ads.items():
@@ -336,34 +374,35 @@ def run_research(chat_id: str = None):
                 copy = (ad.get("ad_creative_bodies") or []) + (ad.get("ad_creative_link_titles") or [])
                 if copy:
                     lines.append(f'  "{copy[0][:150]}"')
-                if ad.get("ad_snapshot_url"):
-                    lines.append(f'  🔗 {ad["ad_snapshot_url"]}')
     else:
         lines.append("Kein Meta-Token konfiguriert.")
 
-    # Was ich heute gelernt habe
     lines.append(f"\n<b>Was ich heute gelernt habe (Session #{brain['sessions']})</b>")
-
-    new_desires = [d for d in brain["desires"][-5:]]
-    new_problems = [p for p in brain["problems"][-5:]]
-    new_lang = [l for l in brain["language"][-3:]]
+    new_desires = brain["desires"][-5:]
+    new_problems = brain["problems"][-5:]
+    new_lang = brain["language"][-3:]
 
     if new_desires:
-        lines.append("\n💚 <b>Kundenwünsche:</b>")
+        lines.append("\n\U0001f49a <b>Kundenwuensche:</b>")
         for d in new_desires:
             lines.append(f"  • {d}")
     if new_problems:
-        lines.append("\n😤 <b>Probleme &amp; Frustrationen:</b>")
+        lines.append("\n\U0001f621 <b>Probleme &amp; Frustrationen:</b>")
         for p in new_problems:
             lines.append(f"  • {p}")
     if new_lang:
-        lines.append("\n💬 <b>Kundensprache (O-Ton):</b>")
+        lines.append("\n\U0001f4ac <b>Kundensprache (O-Ton):</b>")
         for l in new_lang:
             lines.append(f'  "{l}"')
 
-    lines.append(f"\n📊 {len(all_posts)} Posts gescannt | Gehirn hat {brain['sessions']} Sessions gelernt")
+    lines.append(f"\n\U0001f4ca {len(all_posts)} Posts gescannt | Gehirn hat {brain['sessions']} Sessions gelernt")
 
-    send_telegram("\n".join(lines), chat_id=chat_id)
+    full_text = "\n".join(lines)
+    send_telegram(full_text, chat_id=chat_id)
+
+    plain_text = re.sub(r'<[^>]+>', '', full_text)
+    write_to_google_doc(plain_text)
+
     log.info("Research sent.")
 
 
@@ -380,30 +419,30 @@ def send_total(chat_id: str):
     lines.append(f"<i>Letztes Update: {brain.get('last_update', 'unbekannt')}</i>\n")
 
     if brain["desires"]:
-        lines.append("<b>💚 Kundenwünsche (was sie wollen):</b>")
+        lines.append("<b>\U0001f49a Kundenwuensche (was sie wollen):</b>")
         for d in brain["desires"][-15:]:
             lines.append(f"  • {d}")
 
     if brain["problems"]:
-        lines.append("\n<b>😤 Probleme &amp; Frustrationen:</b>")
+        lines.append("\n<b>\U0001f621 Probleme &amp; Frustrationen:</b>")
         for p in brain["problems"][-15:]:
             lines.append(f"  • {p}")
 
     if brain["language"]:
-        lines.append("\n<b>💬 Kundensprache (O-Töne):</b>")
+        lines.append("\n<b>\U0001f4ac Kundensprache (O-Toene):</b>")
         for l in brain["language"][-10:]:
             lines.append(f'  "{l}"')
 
     if brain["hooks"]:
-        lines.append("\n<b>🔥 Bewährte Hook-Ideen:</b>")
+        lines.append("\n<b>\U0001f525 Bewaehrte Hook-Ideen:</b>")
         for h in brain["hooks"][-15:]:
             lines.append(f"  → {h}")
 
     if brain["top_posts"]:
-        lines.append("\n<b>⭐ Top Posts aller Zeit:</b>")
+        lines.append("\n<b>\u2b50 Top Posts aller Zeit:</b>")
         for p in brain["top_posts"][-10:]:
             src = p.get("source", "")
-            lines.append(f'  • [{src}] <a href="{p["url"]}">{p["title"][:80]}</a>')
+            lines.append(f'  • [{src}] {p["title"][:100]}')
 
     send_telegram("\n".join(lines), chat_id=chat_id)
 
@@ -429,18 +468,18 @@ def webhook():
             chat_id=chat_id
         )
     elif text == "/research":
-        send_telegram("Recherche gestartet... dauert ~45 Sek.", chat_id=chat_id)
+        send_telegram("Recherche gestartet... dauert ~2 Min.", chat_id=chat_id)
         threading.Thread(target=run_research, args=(chat_id,), daemon=True).start()
     elif text == "/total":
         threading.Thread(target=send_total, args=(chat_id,), daemon=True).start()
     elif text == "/status":
         brain = load_brain()
         send_telegram(
-            f"Bot läuft ✅\n"
+            f"Bot laeuft \u2705\n"
             f"Gehirn: {brain['sessions']} Sessions gelernt\n"
             f"Desires: {len(brain['desires'])} | Probleme: {len(brain['problems'])}\n"
             f"Hooks: {len(brain['hooks'])} | Sprach-Snippets: {len(brain['language'])}\n"
-            f"Täglich um 10:00 Uhr (DE)",
+            f"Taeglich um 10:00 Uhr (DE)",
             chat_id=chat_id
         )
     else:
