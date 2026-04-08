@@ -16,9 +16,12 @@ META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "6471286176f84407849480f3defa781")
+PWA_SECRET = os.environ.get("PWA_SECRET", "cutis-research-2024")
 
 BRAIN_FILE = "/tmp/brain.json"
 app = Flask(__name__)
+
+last_research_cache: dict = {}
 
 
 def write_to_notion(data):
@@ -85,6 +88,13 @@ def write_to_notion(data):
                 children.append(bullet("\U0001f624 " + p))
             for l in brain.get("language", [])[-3:]:
                 children.append(quote(l))
+        if data.get("trustpilot"):
+            children.append(divider())
+            children.append(h2("\u2b50 Trustpilot \u2014 Konkurrenz Reviews"))
+            for p in data["trustpilot"][:6]:
+                children.append(bullet(p["title"][:150]))
+                if p.get("body"):
+                    children.append(quote(p["body"][:300]))
         children.append(divider())
         children.append({
             "object": "block", "type": "paragraph",
@@ -242,6 +252,36 @@ def gather_reddit():
     return all_posts
 
 
+def gather_trustpilot():
+    queries = [
+        'site:trustpilot.com "getcellu"',
+        'site:trustpilot.com "Happy Mammoth"',
+        'site:trustpilot.com "crepey skin" cream',
+        'site:trustpilot.com "skin tightening" collagen',
+        'site:trustpilot.com "anti-aging" skin supplement',
+    ]
+    all_reviews, seen = [], set()
+    for q in queries:
+        try:
+            r = requests.get("https://serpapi.com/search",
+                             params={"api_key": SERPAPI_KEY, "engine": "google", "q": q, "num": 5},
+                             timeout=20)
+            r.raise_for_status()
+            for res in r.json().get("organic_results", []):
+                url = res.get("link", "")
+                if not url or url in seen or "trustpilot.com" not in url:
+                    continue
+                seen.add(url)
+                all_reviews.append({
+                    "title": res.get("title", ""), "url": url,
+                    "body": res.get("snippet", "")[:400], "source": "trustpilot",
+                })
+        except Exception as e:
+            log.warning("Trustpilot error: " + str(e))
+    log.info("Trustpilot reviews: " + str(len(all_reviews)))
+    return all_reviews
+
+
 def gather_amazon():
     queries = [
         "site:amazon.com crepey skin review",
@@ -276,10 +316,12 @@ def gather_amazon():
 
 
 def run_research(chat_id=None):
+    global last_research_cache
     today = datetime.now(timezone.utc).strftime("%d.%m.%Y")
     log.info("Starting research run...")
     reddit_posts = gather_reddit()
     amazon_posts = gather_amazon()
+    trustpilot_reviews = gather_trustpilot()
     all_posts = reddit_posts + amazon_posts
     brain = load_brain()
     brain = update_brain(brain, reddit_posts, amazon_posts)
@@ -304,6 +346,7 @@ def run_research(chat_id=None):
     notion_data = {
         "reddit_top": sorted(reddit_posts, key=score_post, reverse=True)[:12],
         "amazon_top": sorted(amazon_posts, key=score_post, reverse=True)[:8],
+        "trustpilot": trustpilot_reviews,
         "desires": desires, "problems": problems, "language": language,
         "hooks": hooks, "total_posts": len(all_posts), "brain": brain,
     }
@@ -337,6 +380,33 @@ def run_research(chat_id=None):
         for h in hooks:
             lines.append("  \u2192 " + h[:120])
     lines.append("\n\U0001f4ca " + str(len(all_posts)) + " Posts \u00b7 Session #" + str(brain["sessions"]) + " \u00b7 Notion \u2705")
+
+    if trustpilot_reviews:
+        lines.append("\n\u2b50 <b>Trustpilot \u2014 Konkurrenz</b>")
+        for p in trustpilot_reviews[:4]:
+            lines.append("\u2022 " + p["title"][:100])
+            if p.get("body"):
+                lines.append("  \u2514 \"" + p["body"][:150] + "\"")
+
+    lines.append("\n\U0001f4ca " + str(len(all_posts)) + " Posts \u00b7 " + str(len(trustpilot_reviews)) + " Trustpilot \u00b7 Session #" + str(brain["sessions"]) + " \u00b7 Notion \u2705")
+
+    # Trustpilot ins Brain
+    if "trustpilot" not in brain:
+        brain["trustpilot"] = []
+    brain["trustpilot"] = (brain["trustpilot"] + [
+        {"title": p["title"][:100], "body": p["body"][:200], "url": p["url"]}
+        for p in trustpilot_reviews
+    ])[-50:]
+    save_brain(brain)
+
+    # Cache for PWA
+    last_research_cache = {
+        "date": today,
+        "reddit_count": len(reddit_posts),
+        "amazon_count": len(amazon_posts),
+        "trustpilot_count": len(trustpilot_reviews),
+        "top_hooks": hooks[:5],
+    }
 
     send_telegram("\n".join(lines), chat_id=chat_id)
     write_to_notion(notion_data)
@@ -397,8 +467,46 @@ def webhook():
 
 @app.route("/run", methods=["GET", "POST"])
 def run_endpoint():
+    key = request.args.get("key", "") or (request.get_json(silent=True) or {}).get("key", "")
+    if key != PWA_SECRET:
+        return "unauthorized", 401
     threading.Thread(target=run_research, daemon=True).start()
     return "Research started", 200
+
+
+@app.route("/api/data")
+def api_data():
+    if request.args.get("key", "") != PWA_SECRET:
+        return {"error": "unauthorized"}, 401
+    brain = load_brain()
+    return {
+        "brain": {
+            "sessions": brain.get("sessions", 0),
+            "last_update": brain.get("last_update", "–"),
+            "desires": brain.get("desires", [])[-10:],
+            "problems": brain.get("problems", [])[-10:],
+            "language": brain.get("language", [])[-8:],
+            "hooks": brain.get("hooks", [])[-10:],
+            "top_posts": brain.get("top_posts", [])[-8:],
+            "trustpilot": brain.get("trustpilot", [])[-6:],
+        },
+        "last_run": last_research_cache,
+    }
+
+
+@app.route("/dashboard")
+def dashboard():
+    if request.args.get("key", "") != PWA_SECRET:
+        return "Unauthorized", 401
+    from flask import render_template
+    return render_template("dashboard.html", secret=PWA_SECRET)
+
+
+@app.route("/sw.js")
+def service_worker():
+    from flask import send_from_directory
+    return send_from_directory("static", "sw.js", mimetype="application/javascript")
+
 
 @app.route("/")
 def health():

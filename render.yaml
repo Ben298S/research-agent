@@ -11,10 +11,16 @@ services:
         sync: false
       - key: META_ACCESS_TOKEN
         sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: NOTION_TOKEN
+        sync: false
+      - key: PWA_SECRET
+        sync: false
 
   - type: cron
     name: daily-research
     runtime: python
     schedule: "0 8 * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: curl -X POST https://research-agent.onrender.com/run
+    startCommand: curl -X POST "https://research-agent.onrender.com/run?key=${PWA_SECRET}"

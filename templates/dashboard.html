@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CUTIS Research">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>CUTIS Research</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0a; --card: #141414; --border: #222; --text: #f0f0f0;
+      --muted: #888; --green: #22c55e; --red: #ef4444;
+      --yellow: #f59e0b; --blue: #3b82f6; --purple: #a855f7;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+    header {
+      background: var(--card); border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      padding-top: calc(16px + env(safe-area-inset-top));
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .logo { font-size: 18px; font-weight: 700; }
+    .logo span { color: var(--green); }
+    .last-update { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .run-btn {
+      background: var(--green); color: #000; border: none;
+      border-radius: 8px; padding: 8px 16px; font-size: 14px;
+      font-weight: 600; cursor: pointer;
+    }
+    .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .stats-row {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 8px; padding: 16px;
+    }
+    .stat-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px; text-align: center;
+    }
+    .stat-num { font-size: 24px; font-weight: 700; }
+    .stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; text-transform: uppercase; }
+    .section { padding: 0 16px 16px; }
+    .section-title {
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 8px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    }
+    .item {
+      padding: 11px 14px; border-bottom: 1px solid var(--border);
+      font-size: 14px; line-height: 1.4;
+    }
+    .item:last-child { border-bottom: none; }
+    .item a { color: var(--text); text-decoration: none; }
+    .item-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .empty { padding: 20px; text-align: center; color: var(--muted); font-size: 14px; }
+    .loading { display: flex; justify-content: center; align-items: center; padding: 60px 20px; color: var(--muted); gap: 10px; }
+    .spinner {
+      width: 20px; height: 20px; border: 2px solid var(--border);
+      border-top-color: var(--green); border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast {
+      position: fixed; bottom: calc(20px + env(safe-area-inset-bottom));
+      left: 50%; transform: translateX(-50%);
+      background: #1a1a1a; border: 1px solid var(--border); color: var(--text);
+      padding: 10px 20px; border-radius: 24px; font-size: 14px;
+      z-index: 100; opacity: 0; transition: opacity 0.3s; white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="logo">CUTIS <span>Research</span></div>
+    <div class="last-update" id="lastUpdate">Lädt...</div>
+  </div>
+  <button class="run-btn" id="runBtn" onclick="triggerResearch()">▶ Run</button>
+</header>
+<div id="app"><div class="loading"><div class="spinner"></div> Daten laden...</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const SECRET = "{{ secret }}";
+
+function showToast(msg, d=3000) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), d);
+}
+
+async function triggerResearch() {
+  const btn = document.getElementById("runBtn");
+  btn.disabled = true; btn.textContent = "⏳ Läuft...";
+  try {
+    const r = await fetch(`/run?key=${SECRET}`, { method: "POST" });
+    showToast(r.ok ? "Research gestartet! ~60 Sek. bis Telegram." : "Fehler.", 5000);
+  } catch(e) { showToast("Netzwerkfehler."); }
+  setTimeout(() => { btn.disabled = false; btn.textContent = "▶ Run"; }, 90000);
+}
+
+function section(title, color, items, renderFn, empty="Noch keine Daten") {
+  const wrap = document.createElement("div");
+  wrap.className = "section";
+  wrap.innerHTML = `<div class="section-title"><div class="dot" style="background:${color}"></div>${title}</div>`;
+  const card = document.createElement("div");
+  card.className = "card";
+  if (!items || !items.length) {
+    card.innerHTML = `<div class="empty">${empty}</div>`;
+  } else {
+    items.forEach(item => {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = renderFn(item);
+      card.appendChild(div);
+    });
+  }
+  wrap.appendChild(card);
+  return wrap;
+}
+
+function renderApp(data) {
+  const brain = data.brain;
+  document.getElementById("lastUpdate").textContent = brain.last_update ? `Update: ${brain.last_update}` : "Noch kein Run";
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+
+  // Stats
+  const stats = document.createElement("div");
+  stats.className = "stats-row";
+  [
+    [brain.sessions, "Sessions", "var(--green)"],
+    [brain.desires.length, "Desires", "var(--blue)"],
+    [brain.problems.length, "Probleme", "var(--red)"],
+    [brain.hooks.length, "Hooks", "var(--yellow)"],
+  ].forEach(([n, l, c]) => {
+    stats.innerHTML += `<div class="stat-card"><div class="stat-num" style="color:${c}">${n}</div><div class="stat-label">${l}</div></div>`;
+  });
+  app.appendChild(stats);
+
+  app.appendChild(section("Kundenwünsche", "var(--green)", brain.desires,
+    d => `<span style="color:var(--green);margin-right:6px">💚</span>${d}`));
+
+  app.appendChild(section("Probleme & Frustrationen", "var(--red)", brain.problems,
+    p => `<span style="color:var(--red);margin-right:6px">😤</span>${p}`));
+
+  app.appendChild(section("Trending Hooks", "var(--yellow)", brain.hooks,
+    h => `<span style="color:var(--yellow);margin-right:6px">🔥</span>${h}`));
+
+  app.appendChild(section("Trustpilot — Konkurrenz", "var(--purple)", brain.trustpilot,
+    p => `<a href="${p.url}" target="_blank">${p.title}</a>${p.body ? `<div class="item-sub">"${p.body}"</div>` : ""}`));
+
+  app.appendChild(section("Kundensprache O-Ton", "var(--blue)", brain.language,
+    l => `<span style="color:var(--muted)">"</span>${l}<span style="color:var(--muted)">"</span>`));
+
+  app.appendChild(section("Top Posts", "var(--muted)", brain.top_posts,
+    p => `<a href="${p.url}" target="_blank">${p.title}</a><div class="item-sub">${p.source}</div>`));
+}
+
+async function loadData() {
+  try {
+    const r = await fetch(`/api/data?key=${SECRET}`);
+    if (!r.ok) throw new Error("unauthorized");
+    renderApp(await r.json());
+  } catch(e) {
+    document.getElementById("app").innerHTML = `<div class="empty" style="padding:40px">Fehler: ${e.message}</div>`;
+  }
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
+loadData();
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>
