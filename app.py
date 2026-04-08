@@ -438,8 +438,6 @@ def send_total(chat_id):
     send_telegram("\n".join(lines), chat_id=chat_id)
 
 
-app = Flask(__name__)
-
 @app.route("/webhook/" + TELEGRAM_BOT_TOKEN, methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
