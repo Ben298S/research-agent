@@ -6,6 +6,8 @@ import requests
 import threading
 from datetime import datetime, timezone
 from flask import Flask, request
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -17,6 +19,7 @@ SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "6471286176f84407849480f3defa781")
 PWA_SECRET = os.environ.get("PWA_SECRET", "cutis-research-2024")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 BRAIN_FILE = "/tmp/brain.json"
 app = Flask(__name__)
@@ -413,6 +416,63 @@ def run_research(chat_id=None):
     log.info("Research done.")
 
 
+def generate_ad_copy(chat_id=None):
+    if not ANTHROPIC_API_KEY:
+        log.warning("ANTHROPIC_API_KEY fehlt – Ad Copy übersprungen.")
+        return
+    brain = load_brain()
+    if brain.get("sessions", 0) == 0:
+        log.info("Brain leer – Ad Copy übersprungen.")
+        return
+
+    desires = brain.get("desires", [])[-8:]
+    problems = brain.get("problems", [])[-8:]
+    hooks = brain.get("hooks", [])[-8:]
+    language = brain.get("language", [])[-5:]
+
+    if not desires and not problems:
+        send_telegram("Brain noch leer. Starte erst /research!", chat_id=chat_id)
+        return
+
+    prompt = (
+        "Du bist ein Direct-Response Copywriter für CUTIS, eine Anti-Aging Skincare Brand.\n"
+        "Produkt: Skin-Tightening Serum/Creme für Frauen 40-65 mit schlaffer, crepey skin.\n"
+        "Ziel: Facebook/Instagram Ads die sofort konvertieren.\n\n"
+        "ECHTE MARKTFORSCHUNG (frisch von Reddit, Amazon, Trustpilot):\n\n"
+        "Kundenwünsche:\n" + "\n".join(f"• {d}" for d in desires) + "\n\n"
+        "Probleme & Frustrationen:\n" + "\n".join(f"• {p}" for p in problems) + "\n\n"
+        "Echte Kundensprache (O-Töne):\n" + "\n".join(f'"{l}"' for l in language) + "\n\n"
+        "Trending Hooks:\n" + "\n".join(f"→ {h}" for h in hooks) + "\n\n"
+        "Schreibe GENAU 3 verschiedene Facebook/Instagram Ads.\n"
+        "Jede Ad hat:\n"
+        "- HOOK: 1 Satz, packt den echten Schmerz oder Wunsch\n"
+        "- BODY: 2-3 Sätze, nutze die echte Kundensprache, Problem → Lösung\n"
+        "- CTA: Klar, spezifisch, Dringlichkeit\n\n"
+        "Format (exakt so):\n"
+        "AD 1:\n🎯 HOOK: ...\n📝 BODY: ...\n🛒 CTA: ...\n\n"
+        "AD 2:\n🎯 HOOK: ...\n📝 BODY: ...\n🛒 CTA: ...\n\n"
+        "AD 3:\n🎯 HOOK: ...\n📝 BODY: ...\n🛒 CTA: ...\n\n"
+        "Wichtig: Nutze die ECHTEN Worte der Kunden. Keine generischen Phrasen."
+    )
+
+    try:
+        import anthropic as anthropic_sdk
+        client = anthropic_sdk.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        ad_text = response.content[0].text
+        today = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+        msg = f"🎯 <b>Ad Copy — {today}</b>\n\n{ad_text}"
+        send_telegram(msg, chat_id=chat_id)
+        log.info("Ad Copy generiert und gesendet.")
+    except Exception as e:
+        log.error("Ad Copy error: " + str(e))
+        send_telegram("Ad Copy Fehler: " + str(e)[:200], chat_id=chat_id)
+
+
 def send_total(chat_id):
     brain = load_brain()
     if brain["sessions"] == 0:
@@ -447,11 +507,20 @@ def webhook():
     if not chat_id:
         return "ok"
     if text in ["/start", "/help"]:
-        send_telegram("Befehle:\n/research - Recherchieren\n/total - Alles Gelernte\n/status - Status",
-                      chat_id=chat_id)
+        send_telegram(
+            "Befehle:\n"
+            "/research - Jetzt recherchieren\n"
+            "/adcopy - 3 fertige Ads generieren\n"
+            "/total - Alles Gelernte\n"
+            "/status - Bot Status",
+            chat_id=chat_id
+        )
     elif text == "/research":
-        send_telegram("Recherche laeuft... ~2 Min. -> Notion ok", chat_id=chat_id)
+        send_telegram("Recherche laeuft... ~2 Min. → Notion ✅", chat_id=chat_id)
         threading.Thread(target=run_research, args=(chat_id,), daemon=True).start()
+    elif text == "/adcopy":
+        send_telegram("Generiere 3 Ads aus dem Brain... ~15 Sek. ⏳", chat_id=chat_id)
+        threading.Thread(target=generate_ad_copy, args=(chat_id,), daemon=True).start()
     elif text == "/total":
         threading.Thread(target=send_total, args=(chat_id,), daemon=True).start()
     elif text == "/status":
@@ -509,6 +578,23 @@ def service_worker():
 @app.route("/")
 def health():
     return "OK", 200
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler = BackgroundScheduler(timezone="Europe/Berlin")
+scheduler.add_job(
+    func=run_research,
+    trigger=CronTrigger(hour=9, minute=0),
+    id="daily_research",
+    replace_existing=True,
+)
+scheduler.add_job(
+    func=generate_ad_copy,
+    trigger=CronTrigger(hour=9, minute=30),
+    id="daily_adcopy",
+    replace_existing=True,
+)
+scheduler.start()
+log.info("Scheduler gestartet — Research 09:00, Ad Copy 09:30 (DE-Zeit).")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

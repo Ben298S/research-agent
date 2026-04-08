@@ -17,6 +17,8 @@ services:
         sync: false
       - key: PWA_SECRET
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
   - type: cron
     name: daily-research
