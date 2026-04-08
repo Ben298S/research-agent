@@ -23,4 +23,4 @@ services:
     runtime: python
     schedule: "0 8 * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: curl -X POST "https://research-agent.onrender.com/run?key=${PWA_SECRET}"
+    startCommand: curl -X POST "https://research-agent-7ken.onrender.com/run?key=${PWA_SECRET}"
