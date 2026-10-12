@@ -6,5 +6,13 @@
   "background_color": "#0a0a0a",
   "theme_color": "#22c55e",
   "orientation": "portrait",
-  "icons": []
+  "icons": [],
+  "lang": "de",
+  "start_url": "/",
+  "scope": "/",
+  "categories": [
+    "business",
+    "productivity",
+    "utilities"
+  ]
 }
