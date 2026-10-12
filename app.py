@@ -18,11 +18,21 @@ META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "6471286176f84407849480f3defa781")
-PWA_SECRET = os.environ.get("PWA_SECRET", "cutis-research-2024")
+PWA_SECRET = os.environ.get("PWA_SECRET", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 BRAIN_FILE = "/tmp/brain.json"
 app = Flask(__name__)
+
+@app.after_request
+def add_security_headers(response):
+    """Apply baseline browser security headers to dashboard/API responses."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
+
 
 last_research_cache: dict = {}
 
@@ -535,7 +545,7 @@ def webhook():
 @app.route("/run", methods=["GET", "POST"])
 def run_endpoint():
     key = request.args.get("key", "") or (request.get_json(silent=True) or {}).get("key", "")
-    if key != PWA_SECRET:
+    if not PWA_SECRET or key != PWA_SECRET:
         return "unauthorized", 401
     threading.Thread(target=run_research, daemon=True).start()
     return "Research started", 200
@@ -543,7 +553,7 @@ def run_endpoint():
 
 @app.route("/api/data")
 def api_data():
-    if request.args.get("key", "") != PWA_SECRET:
+    if not PWA_SECRET or request.args.get("key", "") != PWA_SECRET:
         return {"error": "unauthorized"}, 401
     brain = load_brain()
     return {
