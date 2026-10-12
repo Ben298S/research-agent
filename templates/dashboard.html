@@ -39,8 +39,13 @@
     }
     .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .stats-row {
-      display: grid; grid-template-columns: repeat(4, 1fr);
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px; padding: 16px;
+    }
+    @media (max-width: 520px) {
+      .stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      header { gap: 12px; padding-left: 14px; padding-right: 14px; }
+      .run-btn { padding: 8px 12px; }
     }
     .stat-card {
       background: var(--card); border: 1px solid var(--border);
@@ -97,6 +102,17 @@
 <script>
 const SECRET = "{{ secret }}";
 
+function escapeHTML(value) {
+  return String(value ?? "").split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;").split(String.fromCharCode(34)).join("&quot;").split(String.fromCharCode(39)).join("&#39;");
+}
+
+function safeLink(value) {
+  try {
+    const url = new URL(String(value ?? ""));
+    return ["https:", "http:"].includes(url.protocol) ? escapeHTML(url.href) : "#";
+  } catch { return "#"; }
+}
+
 function showToast(msg, d=3000) {
   const t = document.getElementById("toast");
   t.textContent = msg; t.classList.add("show");
@@ -107,7 +123,7 @@ async function triggerResearch() {
   const btn = document.getElementById("runBtn");
   btn.disabled = true; btn.textContent = "⏳ Läuft...";
   try {
-    const r = await fetch(`/run?key=${SECRET}`, { method: "POST" });
+    const r = await fetch(`/run?key=${encodeURIComponent(SECRET)}`, { method: "POST" });
     showToast(r.ok ? "Research gestartet! ~60 Sek. bis Telegram." : "Fehler.", 5000);
   } catch(e) { showToast("Netzwerkfehler."); }
   setTimeout(() => { btn.disabled = false; btn.textContent = "▶ Run"; }, 90000);
@@ -134,7 +150,14 @@ function section(title, color, items, renderFn, empty="Noch keine Daten") {
 }
 
 function renderApp(data) {
-  const brain = data.brain;
+  const brain = data.brain || {};
+  brain.sessions = Number(brain.sessions || 0);
+  brain.desires = Array.isArray(brain.desires) ? brain.desires : [];
+  brain.problems = Array.isArray(brain.problems) ? brain.problems : [];
+  brain.hooks = Array.isArray(brain.hooks) ? brain.hooks : [];
+  brain.trustpilot = Array.isArray(brain.trustpilot) ? brain.trustpilot : [];
+  brain.language = Array.isArray(brain.language) ? brain.language : [];
+  brain.top_posts = Array.isArray(brain.top_posts) ? brain.top_posts : [];
   document.getElementById("lastUpdate").textContent = brain.last_update ? `Update: ${brain.last_update}` : "Noch kein Run";
   const app = document.getElementById("app");
   app.innerHTML = "";
@@ -153,27 +176,27 @@ function renderApp(data) {
   app.appendChild(stats);
 
   app.appendChild(section("Kundenwünsche", "var(--green)", brain.desires,
-    d => `<span style="color:var(--green);margin-right:6px">💚</span>${d}`));
+    d => `<span style="color:var(--green);margin-right:6px">💚</span>${escapeHTML(d)}`));
 
   app.appendChild(section("Probleme & Frustrationen", "var(--red)", brain.problems,
-    p => `<span style="color:var(--red);margin-right:6px">😤</span>${p}`));
+    p => `<span style="color:var(--red);margin-right:6px">😤</span>${escapeHTML(p)}`));
 
   app.appendChild(section("Trending Hooks", "var(--yellow)", brain.hooks,
-    h => `<span style="color:var(--yellow);margin-right:6px">🔥</span>${h}`));
+    h => `<span style="color:var(--yellow);margin-right:6px">🔥</span>${escapeHTML(h)}`));
 
   app.appendChild(section("Trustpilot — Konkurrenz", "var(--purple)", brain.trustpilot,
-    p => `<a href="${p.url}" target="_blank">${p.title}</a>${p.body ? `<div class="item-sub">"${p.body}"</div>` : ""}`));
+    p => `<a href="${safeLink(p.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(p.title)}</a>${p.body ? `<div class="item-sub">"${escapeHTML(p.body)}"</div>` : ""}`));
 
   app.appendChild(section("Kundensprache O-Ton", "var(--blue)", brain.language,
-    l => `<span style="color:var(--muted)">"</span>${l}<span style="color:var(--muted)">"</span>`));
+    l => `<span style="color:var(--muted)">"</span>${escapeHTML(l)}<span style="color:var(--muted)">"</span>`));
 
   app.appendChild(section("Top Posts", "var(--muted)", brain.top_posts,
-    p => `<a href="${p.url}" target="_blank">${p.title}</a><div class="item-sub">${p.source}</div>`));
+    p => `<a href="${safeLink(p.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(p.title)}</a><div class="item-sub">${escapeHTML(p.source)}</div>`));
 }
 
 async function loadData() {
   try {
-    const r = await fetch(`/api/data?key=${SECRET}`);
+    const r = await fetch(`/api/data?key=${encodeURIComponent(SECRET)}`, { cache: "no-store" });
     if (!r.ok) throw new Error("unauthorized");
     renderApp(await r.json());
   } catch(e) {
