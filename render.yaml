@@ -4,6 +4,7 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
+    healthCheckPath: /
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
@@ -15,6 +16,8 @@ services:
         sync: false
       - key: NOTION_TOKEN
         sync: false
+      - key: NOTION_DB_ID
+        sync: false
       - key: PWA_SECRET
         sync: false
       - key: ANTHROPIC_API_KEY
@@ -25,4 +28,7 @@ services:
     runtime: python
     schedule: "0 8 * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: curl -X POST "https://research-agent-7ken.onrender.com/run?key=${PWA_SECRET}"
+    envVars:
+      - key: PWA_SECRET
+        sync: false
+    startCommand: curl --fail --silent --show-error -X POST "https://research-agent-7ken.onrender.com/run?key=${PWA_SECRET}"

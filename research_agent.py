@@ -14,7 +14,8 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     for chunk in [text[i:i+4096] for i in range(0, len(text), 4096)]:
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "HTML"}, timeout=15)
+        response = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "HTML"}, timeout=15)
+        response.raise_for_status()
 
 
 # ── Reddit via DuckDuckGo ─────────────────────────────────────────────────────

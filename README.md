@@ -66,4 +66,4 @@ Run a syntax check locally:
 python -m compileall -q app.py research_agent.py
 ```
 
-GitHub Actions runs this check on pushes and pull requests. It checks Python syntax only; API integrations still require separate tests with valid credentials.
+GitHub Actions checks whitespace, validates the PWA manifest JSON, and compiles the Python modules on pushes and pull requests. These checks do not exercise third-party APIs; integration flows still need separate tests with valid credentials.

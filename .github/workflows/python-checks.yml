@@ -16,5 +16,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Check whitespace errors
+        run: git diff --check
+      - name: Validate PWA manifest
+        run: python -m json.tool static/manifest.json >/dev/null
       - name: Compile Python modules
         run: python -m compileall -q app.py research_agent.py
